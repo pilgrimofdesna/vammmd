@@ -639,11 +639,48 @@ public static class CoreTests
             c.Step(1 / 90.0, reported);
             worst = Math.Max(worst, Math.Abs((c.Time - prev) - 1 / 90.0)); prev = c.Time;
         }
-        Check(worst < 0.0006, "blocky audio time moves the step by under 0.6 ms: " + worst.ToString("0.######"));
+        // (0.6 ms with the 0.5 s pull of the first build; the pull is 0.3 s now so that a change of
+        // the game's speed is followed without a jump, which costs a little smoothness here)
+        Check(worst < 0.001, "blocky audio time moves the step by under 1 ms: " + worst.ToString("0.######"));
         Check(!c.Jumped, "blocky audio time never snaps");
+        Check(Math.Abs(c.Rate - 1) < 0.01, "rate stays at 1 when the game keeps up: " + c.Rate.ToString("0.####"));
         // big offset: snap and flag
         c.Step(1 / 90.0, c.Time + 3);
         Check(c.Jumped, "large offset snaps and reports a jump");
+        // A heavy scene: VaM lets a frame count for at most two physics steps, so below 45 fps at
+        // 90 Hz the game runs slower than real time while the music does not. The dance has to
+        // stay with the music without jumping.
+        SlowGame(36, 90, 2, 0, 0.012, "36 fps at 90 Hz");
+        SlowGame(30, 90, 2, 1, 0.012, "30 fps at 90 Hz");
+        SlowGame(30, 72, 2, 0, 0.012, "30 fps at 72 Hz");
+        SlowGame(25, 60, 2, 0, 0.012, "25 fps at 60 Hz");
+        // the frame rate drops in the middle of a song: at most one small correction, then in step again
+        {
+            DanceClock k = new DanceClock(); k.Length = 1000; k.Playing = true;
+            double real = 0, acc = 0; int jumps = 0; double late = 0;
+            for (int f = 0; f < 60 * 40; f++)
+            {
+                double frame = f < 60 * 10 ? 1 / 90.0 : 1 / 34.0;
+                real += frame;
+                acc += Math.Min(frame, 2 / 90.0);
+                while (acc >= 1 / 90.0 - 1e-12)
+                {
+                    acc -= 1 / 90.0;
+                    k.Jumped = false;
+                    k.Step(1 / 90.0, Math.Floor(real / 0.0232) * 0.0232);
+                    if (k.Jumped) jumps++;
+                }
+                if (real > 30) late = Math.Max(late, Math.Abs(real - 0.0116 - k.Time));
+            }
+            Check(jumps <= 1, "frame rate drop 90 -> 34 fps: jumps " + jumps);
+            Check(late < 0.02, "frame rate drop: in step again afterwards: " + late.ToString("0.####"));
+        }
+        // no music: the learned rate fades and the dance runs on the game's own time
+        {
+            DanceClock k = new DanceClock(); k.Length = 1000; k.Playing = true; k.Rate = 1.4;
+            for (int i = 0; i < 90 * 20; i++) k.Step(1 / 90.0, double.NaN);
+            Check(Math.Abs(k.Rate - 1) < 0.001, "rate returns to 1 without music: " + k.Rate.ToString("0.####"));
+        }
         // end of the dance
         c = new DanceClock(); c.Length = 1; c.Playing = true;
         for (int i = 0; i < 100; i++) c.Step(1 / 90.0, double.NaN);
@@ -662,6 +699,32 @@ public static class CoreTests
         Near(c.Time, 0.5, 1e-9, "half speed");
         double held = c.Time; c.Playing = false; c.Step(1, double.NaN); Near(c.Time, held, 0, "paused");
         c.Seek(99); Near(c.Time, 10, 0, "seek clamps to the length");
+    }
+
+    // Plays 60 s of music in real time while the game gets fps frames a second, physics steps of
+    // 1/hz and at most cap steps per frame. After the first seconds the dance must be within tol
+    // of the music (the music position is reported in 23 ms blocks, so half a block late on
+    // average) with no more than allowedJumps corrections on the way.
+    private static void SlowGame(double fps, double hz, int cap, int allowedJumps, double tol, string name)
+    {
+        DanceClock k = new DanceClock(); k.Length = 1000; k.Playing = true;
+        double real = 0, acc = 0, worst = 0; int jumps = 0;
+        double frame = 1 / fps, step = 1 / hz;
+        while (real < 60)
+        {
+            real += frame;
+            acc += Math.Min(frame, cap * step);
+            while (acc >= step - 1e-12)
+            {
+                acc -= step;
+                k.Jumped = false;
+                k.Step(step, Math.Floor(real / 0.0232) * 0.0232);
+                if (k.Jumped) jumps++;
+            }
+            if (real > 10) worst = Math.Max(worst, Math.Abs(real - 0.0116 - k.Time));
+        }
+        Check(jumps <= allowedJumps, name + ": jumps " + jumps);
+        Check(worst < tol + step, name + ": stays with the music: " + worst.ToString("0.####") + " s, rate " + k.Rate.ToString("0.###"));
     }
 
     private static void WavTests()

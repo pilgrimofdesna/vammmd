@@ -88,8 +88,15 @@ namespace VamMmd.Core
         public bool Loop;
         public double LoopStart, LoopEnd;   // A-B loop when LoopEnd > LoopStart
 
-        public double PullSeconds = 0.5;    // time constant of the pull towards the audio position
-        public double SnapSeconds = 0.08;   // further off than this: jump (a seek happened elsewhere)
+        public double PullSeconds = 0.3;    // time constant of the pull towards the audio position
+        public double SnapSeconds = 0.12;   // further off than this: jump (a seek happened elsewhere)
+
+        // How fast the music runs against the time steps this clock is given. 1 when the game keeps
+        // up with real time. A heavy scene makes the game run slow (VaM caps the time a frame may
+        // take), the music does not slow down with it, and the dance has to run faster per step
+        // to stay with it. Learned from the error, so that a steady difference leaves no lag.
+        public double Rate = 1;
+        public const double RateMin = 0.5, RateMax = 3;
 
         public bool Jumped;                 // set by Step/Seek when time moved discontinuously; the host clears it
         public bool Ended;                  // set when the end was reached and playback stopped
@@ -109,12 +116,24 @@ namespace VamMmd.Core
         public void Step(double dt, double audioTime)
         {
             if (!Playing || dt <= 0 || double.IsNaN(dt)) return;
-            Time += dt * Speed;
+            Time += dt * Speed * Rate;
             if (!double.IsNaN(audioTime))
             {
                 double err = audioTime - Time;
+                // The rate follows the error (critically damped together with the pull below). A
+                // jump teaches it no more than the largest error the pull would have seen.
+                double kp = 1.0 / PullSeconds;
+                double bounded = err > SnapSeconds ? SnapSeconds : (err < -SnapSeconds ? -SnapSeconds : err);
+                Rate += bounded * dt * kp * kp / (4 * (Speed > 0.05 ? Speed : 0.05));
+                if (Rate < RateMin) Rate = RateMin;
+                if (Rate > RateMax) Rate = RateMax;
                 if (Math.Abs(err) > SnapSeconds) { Time = audioTime; Jumped = true; }
-                else Time += err * Math.Min(1.0, dt / PullSeconds);
+                else Time += err * Math.Min(1.0, dt * kp);
+            }
+            else
+            {
+                // no music to follow: drift back to the game's own time over a few seconds
+                Rate += (1 - Rate) * Math.Min(1.0, dt / 2.0);
             }
             double end = Length;
             double loopTo = 0;

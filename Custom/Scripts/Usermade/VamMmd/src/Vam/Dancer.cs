@@ -20,6 +20,7 @@ namespace VamMmd
         public float LiveScale = 1f;        // the same thing measured on the live skeleton
         public bool Active;                 // controllers are switched on and driven by the player
         public bool Restoring;              // controllers are back at their old pose, still on, waiting for the body to be snapped
+        public bool HiddenForSave;          // between HideForSave and ShowAfterSave
         public int Driven;                  // controllers found
 
         private readonly DAZBone[] _bone = new DAZBone[VB.Count];
@@ -34,6 +35,9 @@ namespace VamMmd
         private readonly FreeControllerV3.RotationState[] _savedRotState = new FreeControllerV3.RotationState[VB.Count];
         private readonly Vector3[] _savedPos = new Vector3[VB.Count];       // in the root's frame
         private readonly Quaternion[] _savedRot = new Quaternion[VB.Count];
+        private readonly Vector3[] _heldPos = new Vector3[VB.Count];        // world, during a scene save
+        private readonly Quaternion[] _heldRot = new Quaternion[VB.Count];
+        private JSONStorableFloat _scaleParam;                              // the Person's size slider
 
         public Dancer(Atom person)
         {
@@ -124,12 +128,12 @@ namespace VamMmd
         private void MeasureScale()
         {
             ParamScale = 1f;
-            JSONStorable rescale = Person.GetStorableByID("rescaleObject");
-            if (rescale != null)
+            if (_scaleParam == null)
             {
-                JSONStorableFloat sc = rescale.GetFloatJSONParam("scale");
-                if (sc != null) ParamScale = sc.val;
+                JSONStorable rescale = Person.GetStorableByID("rescaleObject");
+                if (rescale != null) _scaleParam = rescale.GetFloatJSONParam("scale");
             }
+            if (_scaleParam != null) ParamScale = _scaleParam.val;
             int[] from = { VB.Shldr, VB.ForeArm, VB.Thigh, VB.Shin };
             int[] to = { VB.ForeArm, VB.Hand, VB.Shin, VB.Foot };
             float live = 0, model = 0;
@@ -228,6 +232,44 @@ namespace VamMmd
             }
         }
 
+        // A scene save reads the controllers as they are. While the dance holds them that would
+        // store the dance pose with every controller switched on, and the scene would open with a
+        // rigid body and nothing to give back. So for the moment of the save the controllers show
+        // what they were before the dance; ShowAfterSave puts the dance back. VaM calls both in
+        // the same frame, with no physics step between them, so the body does not move.
+        public void HideForSave()
+        {
+            if (HiddenForSave || !(Active || Restoring) || !_saved || !Alive) return;
+            Vector3 rp = _root.position;
+            Quaternion rq = _root.rotation;
+            for (int k = 0; k < VB.Count; k++)
+            {
+                FreeControllerV3 fc = _ctrl[k];
+                if (fc == null) continue;
+                _heldPos[k] = _ctrlT[k].position;
+                _heldRot[k] = _ctrlT[k].rotation;
+                Place(k, rp + rq * _savedPos[k], rq * _savedRot[k]);
+                fc.currentPositionState = _savedPosState[k];
+                fc.currentRotationState = _savedRotState[k];
+            }
+            HiddenForSave = true;
+        }
+
+        public void ShowAfterSave()
+        {
+            if (!HiddenForSave) return;
+            HiddenForSave = false;
+            if (!(Active || Restoring) || !_saved || !Alive) return;
+            for (int k = 0; k < VB.Count; k++)
+            {
+                FreeControllerV3 fc = _ctrl[k];
+                if (fc == null) continue;
+                fc.currentPositionState = FreeControllerV3.PositionState.On;
+                fc.currentRotationState = FreeControllerV3.RotationState.On;
+                Place(k, _heldPos[k], _heldRot[k]);
+            }
+        }
+
         private void Place(int k, Vector3 pos, Quaternion rot)
         {
             _ctrlT[k].SetPositionAndRotation(pos, rot);
@@ -238,6 +280,8 @@ namespace VamMmd
         public void Write(RigPose pose)
         {
             if (!Active || !Alive) return;
+            // the Person's size slider was moved during the dance: the skeleton has already grown or shrunk
+            if (_scaleParam != null && Mathf.Abs(_scaleParam.val - ParamScale) > 0.001f) MeasureScale();
             Vector3 rp = _root.position;
             Quaternion rq = _root.rotation;
             float s = Scale;

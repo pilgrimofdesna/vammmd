@@ -57,6 +57,22 @@ VAM_MANAGED=/path/to/VaM_Data/Managed sh tests/compile_vam.sh
   reset, then the old states (`Dancer.BeginRestore` / `FinishRestore`).
 - Loading and restore order is not ours: param callbacks only set flags (`_needLoadMotion`,
   `_needLoadAudio`, `_libraryDirty`), the work happens in `Update`.
+- Lowering a `JSONStorableFloat`'s `max` below its value makes the UI slider clamp itself and
+  fire the callback as if the user had dragged it. Set `valNoCallback` first (`SyncLength`;
+  before that fix every song shorter than the one before it was skipped).
+- `isStorable = false` does not stop a restore; params that must not be reset by a partial
+  restore also get `isRestorable = false`.
+- `FileManagerSecure.GetFiles(dir, pattern)` matches the pattern case-sensitively ("*.vmd"
+  misses "X.VMD"). Pass `null` (all files) and filter with `Library.HasExtension`.
+- A scene save stores every controller's state and pose as it is at that moment.
+  `onBeforeSceneSaveHandlers` and `onSceneSavedHandlers` run in the same call with no physics
+  step between them; `Dancer.HideForSave` / `ShowAfterSave` show the save the body from before
+  the dance. Presets saved from the Person's own tabs do not go through these handlers.
+- VaM runs slower than real time whenever a frame takes longer than `physicsUpdateCap` physics
+  steps (`Time.maximumDeltaTime`; cap 2 at 90 Hz means below 45 fps). Audio does not slow down.
+- A plugin that is switched off still receives button clicks and trigger actions, but no
+  `Update`. Anything that takes the body checks `isActiveAndEnabled` first. Coroutines stop
+  when the object is deactivated (`OnDisable` unloads the music, `OnEnable` asks for it again).
 
 ## Conventions in the core
 
@@ -91,8 +107,17 @@ VAM_MANAGED=/path/to/VaM_Data/Managed sh tests/compile_vam.sh
 - **Feet, collar and spine are not re-aligned** to the reference: turning the foot would tilt
   the sole, and the others have no clear counterpart.
 - **Small clock corrections do not reset physics.** The clock snaps to the music when it is
-  more than 80 ms off (a frame hitch); only a jump over 0.5 s, a seek or a new song snaps the
+  more than 120 ms off (a frame hitch); only a jump over 0.5 s, a seek or a new song snaps the
   body, because every reset freezes all physics for 5 frames.
+- **The clock learns the music's rate** (`DanceClock.Rate`). With the pull alone, a scene at
+  36 fps (game time 0.8x) left the dance up to 80 ms late and jumped it forward about twice a
+  second. The rate is the integral part of a critically damped pair with the pull
+  (`PullSeconds` 0.3). Simulated: steady lag under 10 ms from 20 to 90 fps, no jump for a drop
+  from 90 to 34 fps, one for 90 to 30. With a 0.5 s pull the same drops gave 2 and 9 jumps;
+  the price of 0.3 s is a step ripple of 0.7 ms instead of 0.4 ms from the music's 23 ms
+  position blocks. Without music the rate fades back to 1 (the dance runs on game time).
+- **Play waits for the music** (`_playPending`): a WAV decodes over about a second, and a
+  dance that starts before it is ready plays its beginning in silence.
 - **The body is measured from the rest skeleton** (`DAZBone.morphedWorldPosition`, model metres,
   x already negated on import), not from the live pose, so the Person never has to be posed.
   The scale is the Person's `scale` setting, cross-checked against live bone lengths.

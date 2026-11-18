@@ -45,6 +45,7 @@ namespace VamMmd
         private bool _hooked;
         private bool _libraryDirty = true, _dancersDirty = true, _needLoadMotion, _needLoadAudio;
         private bool _hasSeek, _jump, _ignoreAudio, _holdRest, _syncing, _resumeAfterLoad;
+        private bool _playPending;      // Play was asked for while the music was still being decoded
         private double _seekTo;
         private int _resetFrames;
         private float _statusAt;
@@ -62,6 +63,8 @@ namespace VamMmd
                 sc.onAtomAddedHandlers += OnAtomChanged;
                 sc.onAtomRemovedHandlers += OnAtomRemoved;
                 sc.onAtomUIDRenameHandlers += OnAtomRenamed;
+                sc.onBeforeSceneSaveHandlers += OnBeforeSceneSave;
+                sc.onSceneSavedHandlers += OnSceneSaved;
                 _hooked = true;
                 LoadSongSettings();
             }
@@ -81,11 +84,11 @@ namespace VamMmd
             RegisterString(_libraryFolder);
 
             _songChooser = new JSONStorableStringChooser("Song", new List<string>(), new List<string>(), "", "Song", OnSongChosen);
-            _songChooser.isStorable = false;
+            _songChooser.isStorable = _songChooser.isRestorable = false;
             RegisterStringChooser(_songChooser);
 
             _motionChooser = new JSONStorableStringChooser("Motion", new List<string>(), new List<string>(), "", "Motion", OnMotionChosen);
-            _motionChooser.isStorable = false;
+            _motionChooser.isStorable = _motionChooser.isRestorable = false;
             RegisterStringChooser(_motionChooser);
 
             _motionUrl = new JSONStorableUrl("Motion File", "", OnMotionUrl, "vmd", "MMDdata");
@@ -97,10 +100,10 @@ namespace VamMmd
             RegisterUrl(_audioUrl);
 
             _playing = new JSONStorableBool("Playing", false, OnPlayingSet);
-            _playing.isStorable = false;
+            _playing.isStorable = _playing.isRestorable = false;
             RegisterBool(_playing);
             _seeking = new JSONStorableBool("Seeking", false);
-            _seeking.isStorable = false;
+            _seeking.isStorable = _seeking.isRestorable = false;
             RegisterBool(_seeking);
             _loop = new JSONStorableBool("Loop", false);
             RegisterBool(_loop);
@@ -108,14 +111,14 @@ namespace VamMmd
             RegisterBool(_autoNext);
 
             _time = new JSONStorableFloat("Time", 0f, OnTimeSet, 0f, 300f, true);
-            _time.isStorable = false;
+            _time.isStorable = _time.isRestorable = false;
             RegisterFloat(_time);
             _speed = new JSONStorableFloat("Speed", 1f, 0.25f, 2f, true);
             RegisterFloat(_speed);
             _volume = new JSONStorableFloat("Volume", 0.8f, 0f, 1f, true);
             RegisterFloat(_volume);
             _offset = new JSONStorableFloat("Audio Offset", 0f, OnOffsetSet, -1f, 1f, false);
-            _offset.isStorable = false;         // kept per song in Saves/PluginData/VamMmd/songs.json
+            _offset.isStorable = _offset.isRestorable = false;      // kept per song in Saves/PluginData/VamMmd/songs.json
             RegisterFloat(_offset);
             _pelvisTravel = new JSONStorableFloat("Pelvis Travel", 1f, 0.5f, 1.5f, true);
             RegisterFloat(_pelvisTravel);
@@ -180,6 +183,25 @@ namespace VamMmd
         private void OnDisable()
         {
             try { StopInternal(true, true); } catch (Exception e) { Report(e); }
+            // a decode that is running stops with this object and would be left half done
+            try { if (_music != null) { _music.Unload(); _loadedAudio = ""; } } catch (Exception) { }
+        }
+
+        private void OnEnable()
+        {
+            if (_music != null) _needLoadAudio = true;      // not on the first call, which comes before Init
+        }
+
+        // ---- scene save ---------------------------------------------------
+
+        private void OnBeforeSceneSave()
+        {
+            try { if (_dancer != null) _dancer.HideForSave(); } catch (Exception e) { Report(e); }
+        }
+
+        private void OnSceneSaved()
+        {
+            try { if (_dancer != null) _dancer.ShowAfterSave(); } catch (Exception e) { Report(e); }
         }
 
         private void OnDestroy()
@@ -195,6 +217,8 @@ namespace VamMmd
                         sc.onAtomAddedHandlers -= OnAtomChanged;
                         sc.onAtomRemovedHandlers -= OnAtomRemoved;
                         sc.onAtomUIDRenameHandlers -= OnAtomRenamed;
+                        sc.onBeforeSceneSaveHandlers -= OnBeforeSceneSave;
+                        sc.onSceneSavedHandlers -= OnSceneSaved;
                     }
                     _hooked = false;
                 }
@@ -304,7 +328,7 @@ namespace VamMmd
             List<string> paths = new List<string>(), names = new List<string>();
             if (songFolder.Length > 0)
             {
-                List<string> vmds = Library.Files(songFolder, ".vmd", 2);
+                List<string> vmds = Library.Files(songFolder, ".vmd", SongDepth(songFolder));
                 for (int i = 0; i < vmds.Count; i++)
                 {
                     if (!IsBodyMotion(vmds[i])) continue;       // camera and face-only files are not dances
@@ -318,6 +342,13 @@ namespace VamMmd
             for (int i = 0; i < paths.Count; i++)
                 if (string.Equals(paths[i], current, StringComparison.OrdinalIgnoreCase)) match = paths[i];
             _motionChooser.valNoCallback = match;
+        }
+
+        // A song folder is searched two levels deep. The library folder itself, listed as a song
+        // when motions lie directly in it, is not: below it are the other songs.
+        private int SongDepth(string songFolder)
+        {
+            return string.Equals(songFolder, Library.Norm(_libraryFolder.val), StringComparison.OrdinalIgnoreCase) ? 0 : 2;
         }
 
         private static bool IsBodyMotion(string path)
@@ -365,7 +396,7 @@ namespace VamMmd
             string folder = Library.Folder(motionPath);
             List<string> wavs = Library.Files(folder, ".wav", 0);
             if (wavs.Count == 0 && _songChooser.val.Length > 0 && folder.StartsWith(_songChooser.val, StringComparison.OrdinalIgnoreCase))
-                wavs = Library.Files(_songChooser.val, ".wav", 2);
+                wavs = Library.Files(_songChooser.val, ".wav", SongDepth(_songChooser.val));
             return wavs.Count > 0 ? wavs[0] : "";
         }
 
@@ -405,8 +436,9 @@ namespace VamMmd
         private void LoadMotion()
         {
             _needLoadMotion = false;
-            bool wasPlaying = _clock.Playing || _resumeAfterLoad;
+            bool wasPlaying = _clock.Playing || _resumeAfterLoad || _playPending;
             _resumeAfterLoad = false;
+            _playPending = false;
             FlushSongSettings();
             _clock.Playing = false;
             _vmd = null;
@@ -427,6 +459,7 @@ namespace VamMmd
                 }
             }
             _offset.valNoCallback = SongOffset(path);
+            _time.valNoCallback = 0f;
             SyncLength();
             _clock.Seek(0);
             _clock.Jumped = false;
@@ -473,7 +506,11 @@ namespace VamMmd
             double len = _sampler != null ? _sampler.LengthSeconds : 0;
             if (_music != null && _music.Ready && _music.Length + _offset.val > len) len = _music.Length + _offset.val;
             _clock.Length = len;
-            _time.max = len > 1 ? (float)len : 1f;
+            // Value first: a slider whose maximum drops below its value clamps itself and reports
+            // that as if the user had dragged it to the end (the next song would be skipped).
+            float max = len > 1 ? (float)len : 1f;
+            if (_time.val > max) _time.valNoCallback = max;
+            _time.max = max;
         }
 
         // ---- per-song settings --------------------------------------------
@@ -531,6 +568,8 @@ namespace VamMmd
         private void Play()
         {
             _lastError = null;
+            _playPending = false;
+            if (!isActiveAndEnabled) return;        // switched off: nothing would drive the body
             if (_needLoadMotion) LoadMotion();
             if (_sampler == null)
             {
@@ -538,6 +577,10 @@ namespace VamMmd
                 return;
             }
             if (!EnsureDancer(_dancer == null || !_dancer.Active)) return;
+            // The music is decoded over about a second. Starting now would dance its beginning in
+            // silence; Update starts the dance when the music is there.
+            if (_needLoadAudio) LoadAudio();
+            if (_music.Loading) { _playPending = true; return; }
             bool fresh = !_dancer.Active || _holdRest;
             _holdRest = false;
             if (_clock.Length > 0 && _clock.Time >= _clock.Length - 0.02) { _clock.Seek(0); _clock.Jumped = false; fresh = true; }
@@ -551,13 +594,14 @@ namespace VamMmd
 
         private void Pause()
         {
+            _playPending = false;
             _clock.Playing = false;
             if (_music != null) _music.Pause();
         }
 
         private void TogglePlay()
         {
-            if (_clock.Playing) Pause(); else Play();
+            if (_clock.Playing || _playPending) Pause(); else Play();
         }
 
         private void Stop() { StopInternal(true, false); }
@@ -572,7 +616,10 @@ namespace VamMmd
             _clock.Playing = false;
             _holdRest = false;
             _hasSeek = false;
-            _jump = false;
+            _resumeAfterLoad = false;
+            _playPending = false;
+            // a restore that still waits for its snap keeps it (Stop pressed twice in a row)
+            _jump = _jump && _dancer != null && _dancer.Restoring && !immediate;
             if (_music != null) _music.Pause();
             if (_dancer != null && _dancer.Active)
             {
@@ -624,7 +671,12 @@ namespace VamMmd
         {
             if (_libraryDirty) RefreshLibrary();
             List<string> songs = _songChooser.choices;
-            if (songs.Count == 0) { _lastError = "The library folder has no songs: " + _libraryFolder.val; return; }
+            if (songs.Count == 0)
+            {
+                _resumeAfterLoad = false;
+                _lastError = "The library folder has no songs: " + _libraryFolder.val;
+                return;
+            }
             int i = songs.IndexOf(_songChooser.val);
             // skip folders without a dance; give up after one full round
             for (int tries = 0; tries < songs.Count; tries++)
@@ -632,12 +684,13 @@ namespace VamMmd
                 i = ((i < 0 ? (dir > 0 ? -1 : 0) : i) + dir + songs.Count) % songs.Count;
                 FillMotionChooser(songs[i], "");
                 if (_motionChooser.choices.Count == 0) continue;
-                _resumeAfterLoad = _resumeAfterLoad || _clock.Playing;
+                _resumeAfterLoad = _resumeAfterLoad || _clock.Playing || _playPending;
                 _songChooser.valNoCallback = songs[i];
                 _motionChooser.valNoCallback = _motionChooser.choices[0];
                 SetSongFiles(_motionChooser.choices[0]);
                 return;
             }
+            _resumeAfterLoad = false;
             _lastError = "No song in the library has a dance motion.";
         }
 
@@ -652,6 +705,8 @@ namespace VamMmd
                 if (_libraryDirty) RefreshLibrary();
                 if (_needLoadMotion) LoadMotion();
                 if (_needLoadAudio) LoadAudio();
+                if (_dancer != null && _dancer.HiddenForSave) _dancer.ShowAfterSave();     // a save that did not finish
+                if (_playPending && !_music.Loading) Play();
 
                 SuperController sc = SuperController.singleton;
                 bool frozen = (sc != null && sc.freezeAnimation) || Time.timeScale < 0.01f;
@@ -686,6 +741,7 @@ namespace VamMmd
                         if (_dancer.Active) { if (_holdRest) ApplyRest(); else ApplyPose(_clock.Time); }
                         _dancer.SnapPhysics();
                         _resetFrames = ResetFrames;
+                        frozen = true;      // the reset pauses physics from this frame on: no blip of music before it
                     }
                 }
                 else if (_resetFrames == 0 && _dancer != null && _dancer.Restoring)
@@ -693,7 +749,7 @@ namespace VamMmd
                     _dancer.FinishRestore();    // the body is back in its old pose: hand the controllers back
                 }
 
-                SyncMusic(frozen);
+                SyncMusic(frozen || _jump);     // a snap is waiting: the music starts after it
                 if (!_music.Loading && _clock.Length <= 0.001 && (_sampler != null || _music.Ready)) SyncLength();
                 else if (_music.Ready && _music.Length + _offset.val > _clock.Length + 0.01) SyncLength();
 
@@ -740,7 +796,7 @@ namespace VamMmd
 
                 double dt = Time.fixedDeltaTime;
                 _clock.Speed = _speed.val;
-                double expected = _clock.Time + dt * _clock.Speed;
+                double expected = _clock.Time + dt * _clock.Speed * _clock.Rate;
                 double audio = !_ignoreAudio && _music.IsPlaying ? _music.Time + _offset.val : double.NaN;
                 _clock.Jumped = false;
                 _clock.Step(dt, audio);
@@ -788,6 +844,8 @@ namespace VamMmd
         private void CheckRestPose()
         {
             _lastError = null;
+            _playPending = false;
+            if (!isActiveAndEnabled) return;
             if (!EnsureDancer(_dancer == null || !_dancer.Active)) return;
             Pause();
             _dancer.Activate();
@@ -871,7 +929,7 @@ namespace VamMmd
             if (_status.val != text) _status.val = text;
             if (_playButton != null)
             {
-                string label = _clock.Playing ? "Pause" : "Play";
+                string label = _clock.Playing ? "Pause" : (_playPending ? "Loading the music..." : "Play");
                 if (_playButton.label != label) _playButton.label = label;
             }
         }

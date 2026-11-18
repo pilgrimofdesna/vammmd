@@ -15,10 +15,10 @@ Play in the game yet.
 | One fixed size for every body (the same 0.85 or 8.5 cm per MMD unit for everyone) | The dance skeleton is rebuilt on the character's own joints. Travel is scaled by the character's leg length against the model the dances were made for. |
 | The arms' A-pose is one constant angle for all arm bones | Each limb is turned from the character's rest pose to the reference rest pose by its own measured direction (upper arm, forearm, hand, fingers, thigh, shin). |
 | Seeking drags the body through the scene for half a second | The pose is written first, then the body is snapped onto it by VaM's own physics reset. |
-| The music clock is read raw (it moves in 23 ms steps), so the body moves in steps | The dance has its own clock that advances with each physics step and is pulled gently towards the music. |
+| The music clock is read raw (it moves in 23 ms steps), so the body moves in steps | The dance has its own clock that advances with each physics step and is pulled gently towards the music. In a heavy scene, where the game runs slower than real time, it learns the difference and stays with the music. |
 | Targets are computed once per rendered frame, one frame late | Targets are computed inside every physics step for that step's own time. |
 | Loading music touches the scene (audio list, other clips) | The WAV is decoded by the plugin itself and played on its own source. |
-| Nothing is put back afterwards | Stop returns every controller to the state and pose it had before the dance. |
+| Nothing is put back afterwards | Stop returns every controller to the state and pose it had before the dance. A scene saved during a dance is saved with the body as it was before the dance. |
 | Feet float when the legs are almost straight (MMD's leg solver gives up after 40 rounds) | The leg solver's result is finished exactly, so the ankle sits on its goal whenever the goal can be reached. |
 
 Not in this build yet: face morphs, fingers, camera motion, hand-contact keeping, several

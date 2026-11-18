@@ -43,7 +43,8 @@ namespace VamMmd
             try
             {
                 if (dir.Length == 0 || !FileManagerSecure.DirectoryExists(dir)) return;
-                string[] files = FileManagerSecure.GetFiles(dir, "*" + ext);
+                // all files, filtered here: VaM's own pattern match is case-sensitive and would miss "X.VMD"
+                string[] files = FileManagerSecure.GetFiles(dir, null);
                 if (files != null)
                     for (int i = 0; i < files.Length; i++)
                         if (HasExtension(files[i], ext)) found.Add(Norm(files[i]));
