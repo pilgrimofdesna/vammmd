@@ -38,6 +38,7 @@ namespace VamMmd
         private readonly Vector3[] _heldPos = new Vector3[VB.Count];        // world, during a scene save
         private readonly Quaternion[] _heldRot = new Quaternion[VB.Count];
         private JSONStorableFloat _scaleParam;                              // the Person's size slider
+        private float _savedScale = 1f;                                     // Scale when the pose was recorded
 
         public Dancer(Atom person)
         {
@@ -179,6 +180,7 @@ namespace VamMmd
                 fc.currentRotationState = FreeControllerV3.RotationState.On;
             }
             _saved = true;
+            _savedScale = Scale;
             Active = true;
         }
 
@@ -191,11 +193,12 @@ namespace VamMmd
             if (!restore || !_saved || !Alive) return;
             Vector3 rp = _root.position;
             Quaternion rq = _root.rotation;
+            float grow = SavedPoseScale();
             for (int k = 0; k < VB.Count; k++)
             {
                 FreeControllerV3 fc = _ctrl[k];
                 if (fc == null) continue;
-                Place(k, rp + rq * _savedPos[k], rq * _savedRot[k]);
+                Place(k, rp + rq * (_savedPos[k] * grow), rq * _savedRot[k]);
                 fc.currentPositionState = _savedPosState[k];
                 fc.currentRotationState = _savedRotState[k];
             }
@@ -211,8 +214,9 @@ namespace VamMmd
             if (!_saved || !Alive) return;
             Vector3 rp = _root.position;
             Quaternion rq = _root.rotation;
+            float grow = SavedPoseScale();
             for (int k = 0; k < VB.Count; k++)
-                if (_ctrl[k] != null) Place(k, rp + rq * _savedPos[k], rq * _savedRot[k]);
+                if (_ctrl[k] != null) Place(k, rp + rq * (_savedPos[k] * grow), rq * _savedRot[k]);
             Restoring = true;
         }
 
@@ -242,13 +246,14 @@ namespace VamMmd
             if (HiddenForSave || !(Active || Restoring) || !_saved || !Alive) return;
             Vector3 rp = _root.position;
             Quaternion rq = _root.rotation;
+            float grow = SavedPoseScale();
             for (int k = 0; k < VB.Count; k++)
             {
                 FreeControllerV3 fc = _ctrl[k];
                 if (fc == null) continue;
                 _heldPos[k] = _ctrlT[k].position;
                 _heldRot[k] = _ctrlT[k].rotation;
-                Place(k, rp + rq * _savedPos[k], rq * _savedRot[k]);
+                Place(k, rp + rq * (_savedPos[k] * grow), rq * _savedRot[k]);
                 fc.currentPositionState = _savedPosState[k];
                 fc.currentRotationState = _savedRotState[k];
             }
@@ -268,6 +273,15 @@ namespace VamMmd
                 fc.currentRotationState = FreeControllerV3.RotationState.On;
                 Place(k, _heldPos[k], _heldRot[k]);
             }
+        }
+
+        // The pose from before the dance was recorded in metres at the size the Person had then.
+        // When the size slider was moved since, the body has grown or shrunk about its root and
+        // the old pose has to grow with it, or the body would be put back crouched or stretched.
+        private float SavedPoseScale()
+        {
+            if (_scaleParam != null && Mathf.Abs(_scaleParam.val - ParamScale) > 0.001f) MeasureScale();
+            return _savedScale > 0.01f ? Scale / _savedScale : 1f;
         }
 
         private void Place(int k, Vector3 pos, Quaternion rot)

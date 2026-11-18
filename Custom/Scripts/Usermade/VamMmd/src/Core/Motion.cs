@@ -97,6 +97,7 @@ namespace VamMmd.Core
         // to stay with it. Learned from the error, so that a steady difference leaves no lag.
         public double Rate = 1;
         public const double RateMin = 0.5, RateMax = 3;
+        private double _sinceSnap = 1e9;    // stepped seconds since the last jump to the music
 
         public bool Jumped;                 // set by Step/Seek when time moved discontinuously; the host clears it
         public bool Ended;                  // set when the end was reached and playback stopped
@@ -117,17 +118,24 @@ namespace VamMmd.Core
         {
             if (!Playing || dt <= 0 || double.IsNaN(dt)) return;
             Time += dt * Speed * Rate;
+            _sinceSnap += dt;
             if (!double.IsNaN(audioTime))
             {
                 double err = audioTime - Time;
                 // The rate follows the error (critically damped together with the pull below). A
                 // jump teaches it no more than the largest error the pull would have seen.
                 double kp = 1.0 / PullSeconds;
+                double sp = Speed > 0.05 ? Speed : 0.05;
                 double bounded = err > SnapSeconds ? SnapSeconds : (err < -SnapSeconds ? -SnapSeconds : err);
-                Rate += bounded * dt * kp * kp / (4 * (Speed > 0.05 ? Speed : 0.05));
+                bool snap = Math.Abs(err) > SnapSeconds;
+                // A second jump soon after the first is no hitch: the rate is far off (the frame
+                // rate fell or recovered a lot). The error built up since the last jump is the
+                // drift itself, so take it in one go instead of creeping there through more jumps.
+                if (snap && _sinceSnap > 0.05 && _sinceSnap < 3 && Math.Abs(err) < 0.5) Rate += err / (sp * _sinceSnap);
+                else Rate += bounded * dt * kp * kp / (4 * sp);
                 if (Rate < RateMin) Rate = RateMin;
                 if (Rate > RateMax) Rate = RateMax;
-                if (Math.Abs(err) > SnapSeconds) { Time = audioTime; Jumped = true; }
+                if (snap) { Time = audioTime; Jumped = true; _sinceSnap = 0; }
                 else Time += err * Math.Min(1.0, dt * kp);
             }
             else

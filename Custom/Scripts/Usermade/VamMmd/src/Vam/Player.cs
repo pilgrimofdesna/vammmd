@@ -660,7 +660,7 @@ namespace VamMmd
 
         private void OnPlayingSet(bool v)
         {
-            if (v == _clock.Playing) return;
+            if (v == (_clock.Playing || _playPending)) return;      // a start that waits for the music counts as playing
             if (v) Play(); else Pause();
         }
 
@@ -754,7 +754,8 @@ namespace VamMmd
                 else if (_music.Ready && _music.Length + _offset.val > _clock.Length + 0.01) SyncLength();
 
                 _time.valNoCallback = (float)_clock.Time;
-                if (_playing.val != _clock.Playing) _playing.valNoCallback = _clock.Playing;
+                bool playing = _clock.Playing || _playPending;
+                if (_playing.val != playing) _playing.valNoCallback = playing;
                 bool seeking = _resetFrames > 0 || _jump;
                 if (_seeking.val != seeking) _seeking.valNoCallback = seeking;
                 if (Time.unscaledTime >= _statusAt)

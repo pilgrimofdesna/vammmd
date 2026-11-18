@@ -654,6 +654,47 @@ public static class CoreTests
         SlowGame(30, 90, 2, 1, 0.012, "30 fps at 90 Hz");
         SlowGame(30, 72, 2, 0, 0.012, "30 fps at 72 Hz");
         SlowGame(25, 60, 2, 0, 0.012, "25 fps at 60 Hz");
+        // far slower than real time from the first frame: two corrections, not seconds of them
+        SlowGame(25, 90, 2, 2, 0.012, "25 fps at 90 Hz");
+        SlowGame(20, 90, 2, 2, 0.012, "20 fps at 90 Hz");
+        SlowGame(18, 90, 2, 3, 0.012, "18 fps at 90 Hz");
+        // the frame rate recovers (20 -> 90 fps): the dance must not hop backwards for seconds
+        {
+            DanceClock k = new DanceClock(); k.Length = 1000; k.Playing = true;
+            double real = 0, acc = 0; int jumps = 0; double late = 0;
+            while (real < 40)
+            {
+                double frame = real < 15 ? 1 / 20.0 : 1 / 90.0;
+                real += frame;
+                acc += Math.Min(frame, 2 / 90.0);
+                while (acc >= 1 / 90.0 - 1e-12)
+                {
+                    acc -= 1 / 90.0;
+                    k.Jumped = false;
+                    k.Step(1 / 90.0, Math.Floor(real / 0.0232) * 0.0232);
+                    if (k.Jumped && real > 15) jumps++;
+                }
+                if (real > 25) late = Math.Max(late, Math.Abs(real - 0.0116 - k.Time));
+            }
+            Check(jumps <= 2, "frame rate recovers 20 -> 90 fps: jumps " + jumps);
+            Check(late < 0.02, "frame rate recovers: in step again afterwards: " + late.ToString("0.####"));
+        }
+        // two real hitches a second apart (the music ran on while the game stood still) teach the
+        // rate something wrong; it must find its way back without further jumps
+        {
+            DanceClock k = new DanceClock(); k.Length = 1000; k.Playing = true;
+            double heard = 0; int jumps = 0;
+            for (int i = 0; i < 90 * 20; i++)
+            {
+                heard += 1 / 90.0;
+                if (i == 90 * 5 || i == 90 * 6) heard += 0.15;
+                k.Jumped = false;
+                k.Step(1 / 90.0, heard);
+                if (k.Jumped) jumps++;
+            }
+            Check(jumps == 2, "two hitches: one jump each and no more: " + jumps);
+            Check(Math.Abs(k.Rate - 1) < 0.01 && Math.Abs(k.Time - heard) < 0.003, "two hitches: rate and time settle again: " + k.Rate.ToString("0.###"));
+        }
         // the frame rate drops in the middle of a song: at most one small correction, then in step again
         {
             DanceClock k = new DanceClock(); k.Length = 1000; k.Playing = true;

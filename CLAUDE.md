@@ -116,6 +116,14 @@ VAM_MANAGED=/path/to/VaM_Data/Managed sh tests/compile_vam.sh
   from 90 to 34 fps, one for 90 to 30. With a 0.5 s pull the same drops gave 2 and 9 jumps;
   the price of 0.3 s is a step ripple of 0.7 ms instead of 0.4 ms from the music's 23 ms
   position blocks. Without music the rate fades back to 1 (the dance runs on game time).
+  A second jump within 3 s of the last one sets the rate from the drift it just measured;
+  without that a start at 20 fps hopped forward for 11 s and a recovery from 20 to 90 fps
+  hopped backward 22 times (now two jumps each). Two real hitches close together teach a
+  wrong rate for a moment; the pull brings it back without further jumps (tested).
+- **The pose given back follows a size change**: it was recorded in metres at the size the
+  Person had at Play, so Stop and a scene save scale it by the size now over the size then.
+- **The `Playing` bool counts a start that waits for the music**, so a toggle bound to it does
+  not flip by itself and setting it to false cancels the wait.
 - **Play waits for the music** (`_playPending`): a WAV decodes over about a second, and a
   dance that starts before it is ready plays its beginning in silence.
 - **The body is measured from the rest skeleton** (`DAZBone.morphedWorldPosition`, model metres,
