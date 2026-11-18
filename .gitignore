@@ -1,0 +1,6 @@
+*.dll
+*.exe
+*.mdb
+__pycache__/
+*.pyc
+/build/
