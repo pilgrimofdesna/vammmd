@@ -30,7 +30,7 @@ namespace VamMmd
         private JSONStorableString _libraryFolder, _status;
         private JSONStorableUrl _motionUrl, _audioUrl;
         private JSONStorableBool _playing, _seeking, _loop, _autoNext;
-        private JSONStorableFloat _time, _speed, _volume, _offset, _pelvisTravel;
+        private JSONStorableFloat _time, _speed, _volume, _offset, _pelvisTravel, _firmness;
         private UIDynamicButton _playButton;
 
         private readonly DanceClock _clock = new DanceClock();
@@ -65,6 +65,7 @@ namespace VamMmd
                 sc.onAtomUIDRenameHandlers += OnAtomRenamed;
                 sc.onBeforeSceneSaveHandlers += OnBeforeSceneSave;
                 sc.onSceneSavedHandlers += OnSceneSaved;
+                sc.onSceneLoadedHandlers += OnSceneLoaded;
                 _hooked = true;
                 LoadSongSettings();
             }
@@ -122,6 +123,9 @@ namespace VamMmd
             RegisterFloat(_offset);
             _pelvisTravel = new JSONStorableFloat("Pelvis Travel", 1f, 0.5f, 1.5f, true);
             RegisterFloat(_pelvisTravel);
+            // times the hold springs the Person had before the dance (1 = unchanged); put back on Stop
+            _firmness = new JSONStorableFloat("Body Firmness", 2f, OnFirmnessSet, 0.25f, 4f, true);
+            RegisterFloat(_firmness);
 
             _status = new JSONStorableString("Status", "");
             _status.isStorable = false;
@@ -166,6 +170,8 @@ namespace VamMmd
             off.label = "Audio Offset (s, + = music later)";
             off.valueFormat = "F3";
             CreateSlider(_pelvisTravel, true);
+            UIDynamicSlider firm = CreateSlider(_firmness, true);
+            firm.label = "Body Firmness (x the Person's own springs)";
             CreateSpacer(true).height = 12f;
             Button("Measure the body again", true, Refit);
             Button("Check: stand in the dance rest pose", true, CheckRestPose);
@@ -199,6 +205,32 @@ namespace VamMmd
             try { if (_dancer != null) _dancer.HideForSave(); } catch (Exception e) { Report(e); }
         }
 
+        // As a session plugin the player outlives every scene. In a scene that has just been
+        // opened it takes nobody until it is asked to: no dancer is chosen, nothing plays.
+        // (A scene or Person plugin is created anew with its scene and keeps what the scene stored.)
+        private bool IsSessionPlugin
+        {
+            get { return containingAtom != null && containingAtom.type == "SessionPluginManager"; }
+        }
+
+        private void OnSceneLoaded()
+        {
+            try
+            {
+                if (!IsSessionPlugin) return;
+                StopInternal(true, true);
+                _dancer = null;
+                _dancerChooser.valNoCallback = "";
+                _dancersDirty = true;
+            }
+            catch (Exception e) { Report(e); }
+        }
+
+        private void OnFirmnessSet(float v)
+        {
+            if (_dancer != null) _dancer.SetFirmness(v);
+        }
+
         private void OnSceneSaved()
         {
             try { if (_dancer != null) _dancer.ShowAfterSave(); } catch (Exception e) { Report(e); }
@@ -219,6 +251,7 @@ namespace VamMmd
                         sc.onAtomUIDRenameHandlers -= OnAtomRenamed;
                         sc.onBeforeSceneSaveHandlers -= OnBeforeSceneSave;
                         sc.onSceneSavedHandlers -= OnSceneSaved;
+                        sc.onSceneLoadedHandlers -= OnSceneLoaded;
                     }
                     _hooked = false;
                 }
@@ -263,7 +296,7 @@ namespace VamMmd
                 // default: the Person this plugin sits on, else the first one in the scene
                 string pick = "";
                 if (containingAtom != null && containingAtom.type == "Person") pick = containingAtom.uid;
-                else if (ids.Count > 0) pick = ids[0];
+                else if (ids.Count > 0 && !IsSessionPlugin) pick = ids[0];
                 if (pick != _dancerChooser.val && (pick.Length > 0 || !IsDancerAlive())) _dancerChooser.val = pick;
             }
         }
@@ -282,6 +315,13 @@ namespace VamMmd
         {
             if (_dancer == null || !_dancer.Alive)
             {
+                if (_dancerChooser.val.Length == 0)
+                {
+                    // asked to dance with nobody chosen (a session plugin in a fresh scene): the
+                    // only Person, else the first woman, else the first Person
+                    string pick = DefaultDancer();
+                    if (pick.Length > 0) _dancerChooser.valNoCallback = pick;
+                }
                 Atom a = _dancerChooser.val.Length > 0 ? SuperController.singleton.GetAtomByUid(_dancerChooser.val) : null;
                 if (a == null || a.type != "Person") { _lastError = "Choose a Person to dance first."; return false; }
                 _dancer = new Dancer(a);
@@ -294,6 +334,21 @@ namespace VamMmd
                 if (!_dancer.Fit(opt)) { _lastError = "The body could not be measured: " + _dancer.Problem; return false; }
             }
             return true;
+        }
+
+        private static string DefaultDancer()
+        {
+            List<Atom> atoms = SuperController.singleton.GetAtoms();
+            string first = "";
+            for (int i = 0; i < atoms.Count; i++)
+            {
+                Atom a = atoms[i];
+                if (a == null || a.type != "Person") continue;
+                if (first.Length == 0) first = a.uid;
+                DAZCharacterSelector geo = a.GetStorableByID("geometry") as DAZCharacterSelector;
+                if (geo != null && geo.gender == DAZCharacterSelector.Gender.Female) return a.uid;
+            }
+            return first;
         }
 
         // ---- library ------------------------------------------------------
@@ -584,6 +639,7 @@ namespace VamMmd
             bool fresh = !_dancer.Active || _holdRest;
             _holdRest = false;
             if (_clock.Length > 0 && _clock.Time >= _clock.Length - 0.02) { _clock.Seek(0); _clock.Jumped = false; fresh = true; }
+            _dancer.Firmness = _firmness.val;
             _dancer.Activate();
             _clock.Ended = false;
             _clock.Playing = true;
@@ -849,6 +905,7 @@ namespace VamMmd
             if (!isActiveAndEnabled) return;
             if (!EnsureDancer(_dancer == null || !_dancer.Active)) return;
             Pause();
+            _dancer.Firmness = _firmness.val;
             _dancer.Activate();
             _holdRest = true;
             _jump = true;

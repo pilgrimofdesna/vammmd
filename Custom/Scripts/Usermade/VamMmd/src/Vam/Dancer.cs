@@ -40,6 +40,20 @@ namespace VamMmd
         private JSONStorableFloat _scaleParam;                              // the Person's size slider
         private float _savedScale = 1f;                                     // Scale when the pose was recorded
 
+        // How firmly the body follows its controllers: the hold springs of the driven controllers
+        // are this many times what they were before the dance (1 = unchanged), the dampers
+        // sqrt of it so that the body is as well damped as before. Put back with the states.
+        public float Firmness = 1f;
+        private bool _springsSaved;
+        private readonly JSONStorableFloat[] _posSpring = new JSONStorableFloat[VB.Count];
+        private readonly JSONStorableFloat[] _posDamper = new JSONStorableFloat[VB.Count];
+        private readonly JSONStorableFloat[] _rotSpring = new JSONStorableFloat[VB.Count];
+        private readonly JSONStorableFloat[] _rotDamper = new JSONStorableFloat[VB.Count];
+        private readonly float[] _savedPosSpring = new float[VB.Count];
+        private readonly float[] _savedPosDamper = new float[VB.Count];
+        private readonly float[] _savedRotSpring = new float[VB.Count];
+        private readonly float[] _savedRotDamper = new float[VB.Count];
+
         public Dancer(Atom person)
         {
             Person = person;
@@ -71,6 +85,7 @@ namespace VamMmd
                 byName.TryGetValue(VB.Name[k], out b);
                 _bone[k] = b;
                 _ctrl[k] = null; _ctrlT[k] = null; _ctrlC[k] = null;
+                _posSpring[k] = _posDamper[k] = _rotSpring[k] = _rotDamper[k] = null;
                 if (b == null)
                 {
                     if (!VB.IsFinger(k) && Problem == null) Problem = "this Person has no bone named " + VB.Name[k];
@@ -81,6 +96,10 @@ namespace VamMmd
                 if (fc == null) continue;
                 _ctrl[k] = fc;
                 _ctrlT[k] = fc.transform;
+                _posSpring[k] = fc.GetFloatJSONParam("holdPositionSpring");
+                _posDamper[k] = fc.GetFloatJSONParam("holdPositionDamper");
+                _rotSpring[k] = fc.GetFloatJSONParam("holdRotationSpring");
+                _rotDamper[k] = fc.GetFloatJSONParam("holdRotationDamper");
                 if (fc.control != null && fc.control != fc.transform) _ctrlC[k] = fc.control;
                 Driven++;
             }
@@ -164,6 +183,7 @@ namespace VamMmd
                 // started again before the old states were handed back: they are still on, keep the record
                 Restoring = false;
                 Active = true;
+                ApplyFirmness();
                 return;
             }
             Vector3 rp = _root.position;
@@ -181,6 +201,8 @@ namespace VamMmd
             }
             _saved = true;
             _savedScale = Scale;
+            SaveSprings();
+            ApplyFirmness();
             Active = true;
         }
 
@@ -202,6 +224,7 @@ namespace VamMmd
                 fc.currentPositionState = _savedPosState[k];
                 fc.currentRotationState = _savedRotState[k];
             }
+            RestoreSprings();
             _saved = false;
         }
 
@@ -234,6 +257,7 @@ namespace VamMmd
                 fc.currentPositionState = _savedPosState[k];
                 fc.currentRotationState = _savedRotState[k];
             }
+            RestoreSprings();
         }
 
         // A scene save reads the controllers as they are. While the dance holds them that would
@@ -257,6 +281,7 @@ namespace VamMmd
                 fc.currentPositionState = _savedPosState[k];
                 fc.currentRotationState = _savedRotState[k];
             }
+            RestoreSprings();
             HiddenForSave = true;
         }
 
@@ -273,6 +298,63 @@ namespace VamMmd
                 fc.currentRotationState = FreeControllerV3.RotationState.On;
                 Place(k, _heldPos[k], _heldRot[k]);
             }
+            SaveSprings();
+            ApplyFirmness();
+        }
+
+        // ---- firmness -------------------------------------------------------
+
+        public void SetFirmness(float f)
+        {
+            Firmness = f;
+            if (Active && !HiddenForSave) ApplyFirmness();
+        }
+
+        private void SaveSprings()
+        {
+            for (int k = 0; k < VB.Count; k++)
+            {
+                _savedPosSpring[k] = _posSpring[k] != null ? _posSpring[k].val : 0f;
+                _savedPosDamper[k] = _posDamper[k] != null ? _posDamper[k].val : 0f;
+                _savedRotSpring[k] = _rotSpring[k] != null ? _rotSpring[k].val : 0f;
+                _savedRotDamper[k] = _rotDamper[k] != null ? _rotDamper[k].val : 0f;
+            }
+            _springsSaved = true;
+        }
+
+        private void ApplyFirmness()
+        {
+            if (!_springsSaved || !Alive) return;
+            float m = Mathf.Clamp(Firmness, 0.05f, 20f), d = Mathf.Sqrt(m);
+            for (int k = 0; k < VB.Count; k++)
+            {
+                if (_ctrl[k] == null) continue;
+                SetScaled(_posSpring[k], _savedPosSpring[k], m);
+                SetScaled(_posDamper[k], _savedPosDamper[k], d);
+                SetScaled(_rotSpring[k], _savedRotSpring[k], m);
+                SetScaled(_rotDamper[k], _savedRotDamper[k], d);
+            }
+        }
+
+        private static void SetScaled(JSONStorableFloat p, float saved, float factor)
+        {
+            if (p == null) return;
+            float v = Mathf.Clamp(saved * factor, p.min, p.max);
+            if (Mathf.Abs(p.val - v) > 1e-4f) p.val = v;
+        }
+
+        private void RestoreSprings()
+        {
+            if (!_springsSaved || !Alive) return;
+            for (int k = 0; k < VB.Count; k++)
+            {
+                if (_ctrl[k] == null) continue;
+                SetScaled(_posSpring[k], _savedPosSpring[k], 1f);
+                SetScaled(_posDamper[k], _savedPosDamper[k], 1f);
+                SetScaled(_rotSpring[k], _savedRotSpring[k], 1f);
+                SetScaled(_rotDamper[k], _savedRotDamper[k], 1f);
+            }
+            _springsSaved = false;
         }
 
         // The pose from before the dance was recorded in metres at the size the Person had then.
@@ -283,6 +365,8 @@ namespace VamMmd
             if (_scaleParam != null && Mathf.Abs(_scaleParam.val - ParamScale) > 0.001f) MeasureScale();
             return _savedScale > 0.01f ? Scale / _savedScale : 1f;
         }
+
+        private static string ParamText(JSONStorableFloat p) { return p == null ? "-" : p.val.ToString("0.###"); }
 
         private void Place(int k, Vector3 pos, Quaternion rot)
         {
@@ -379,7 +463,9 @@ namespace VamMmd
                 if (fc == null) sb.Append("- | - | - | ");
                 else
                     sb.Append(fc.name).Append(" | ").Append(_ctrlC[k] == null).Append(" | ")
-                      .Append(fc.currentPositionState).Append('/').Append(fc.currentRotationState).Append(" | ");
+                      .Append(fc.currentPositionState).Append('/').Append(fc.currentRotationState).Append(" | ")
+                      .Append("spring ").Append(ParamText(_posSpring[k])).Append('/').Append(ParamText(_rotSpring[k]))
+                      .Append(" damper ").Append(ParamText(_posDamper[k])).Append('/').Append(ParamText(_rotDamper[k])).Append(" | ");
                 sb.Append(Quaternion.Angle(rest, b.startingRotationRelativeToRoot).ToString("0.0")).Append('\n');
             }
             return sb.ToString();

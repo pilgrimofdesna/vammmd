@@ -44,6 +44,11 @@ VaM does not let plugins read anything else.
 3. **Audio Offset** shifts the music against the motion; it is remembered per song in
    `Saves/PluginData/VamMmd/songs.json`.
 4. **Pelvis Travel** scales how far the hips move across the floor and up and down (1 = as fitted).
+5. **Body Firmness** is how firmly the body follows the dance: the Person's own controller
+   springs times this value (1 = unchanged, default 2). Stop puts the old springs back.
+
+As a session plugin the player stays across scenes but takes nobody in a newly opened scene
+until Play is pressed (then the only Person, or the first woman, unless a Dancer is chosen).
 
 The three **Check** buttons write what the plugin measured to the VaM message log and to
 `Saves/PluginData/VamMmd/check.txt`:
@@ -60,7 +65,8 @@ triggers can call them. The storable id is `plugin#N_VamMmd.Player`.
 - actions: `Play`, `Pause`, `Toggle Play`, `Stop`, `Restart`, `Next Song`, `Previous Song`,
   `Seek Forward`, `Seek Back`
 - bools: `Playing`, `Seeking` (true while the body is being placed after a jump), `Loop`, `Auto Next`
-- floats: `Time` (seconds, can be set), `Speed`, `Volume`, `Audio Offset`, `Pelvis Travel`
+- floats: `Time` (seconds, can be set), `Speed`, `Volume`, `Audio Offset`, `Pelvis Travel`,
+  `Body Firmness`
 - choosers: `Dancer`, `Song`, `Motion`; urls: `Motion File`, `Audio File`; string: `Library Folder`
 
 ## Tests
@@ -75,4 +81,7 @@ compares the C# skeleton with it on a real dance (`rigcmp.py`).
 
 ## Licence
 
-Not chosen yet.
+MIT (see `LICENSE`). A VaM Hub package of the plugin is published as CC BY, the closest of
+the licence types VaM offers for a `.var`. No code from other players is included; the
+reference body in `RefBody.Tda` is a table of bone positions measured from a model, not the
+model itself.

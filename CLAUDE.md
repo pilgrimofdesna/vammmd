@@ -126,9 +126,27 @@ VAM_MANAGED=/path/to/VaM_Data/Managed sh tests/compile_vam.sh
   not flip by itself and setting it to false cancels the wait.
 - **Play waits for the music** (`_playPending`): a WAV decodes over about a second, and a
   dance that starts before it is ready plays its beginning in silence.
+- **Body Firmness multiplies the Person's own hold springs** (default x2, dampers x sqrt so
+  the damping ratio stays), instead of setting absolute values or mmd2timeline's
+  AllJointsController percent presets: a scene's own tuning is kept as the base, x1 changes
+  nothing, and Stop / a scene save put the old values back. The default x2 is a guess until
+  the tracking report from the game is in; the body report prints every spring and damper.
+  Param names (game IL): `holdPositionSpring` 0..10000, `holdPositionDamper` 0..100,
+  `holdRotationSpring` 0..1000, `holdRotationDamper` 0..10.
+- **As a session plugin the player takes nobody in a newly opened scene** (owner's wish,
+  2026-11-19): `onSceneLoadedHandlers` stops it and clears the dancer, and no dancer is picked
+  automatically; Play with nobody chosen takes the only Person, else the first woman. A scene
+  or Person plugin keeps picking its own Person as before. Session plugin =
+  `containingAtom.type == "SessionPluginManager"`.
 - **The body is measured from the rest skeleton** (`DAZBone.morphedWorldPosition`, model metres,
   x already negated on import), not from the live pose, so the Person never has to be posed.
   The scale is the Person's `scale` setting, cross-checked against live bone lengths.
+
+## Licence
+
+MIT, chosen by the owner on 2026-11-19; a Hub `.var` says CC BY (VaM's package licence list
+has no MIT). Keep the two consistent, and do not copy code from GPL (mmd2timeline),
+CC BY-SA (Misiv, KAI) or CC BY-NC-SA (UIAssist) sources: ideas and file formats only.
 
 ## Not verified in the game yet
 
