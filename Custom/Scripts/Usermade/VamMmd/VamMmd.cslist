@@ -1,0 +1,13 @@
+src/Core/MathD.cs
+src/Core/Bytes.cs
+src/Core/SjisTable.cs
+src/Core/Vmd.cs
+src/Core/Rig.cs
+src/Core/Fit.cs
+src/Core/Motion.cs
+src/Core/Wav.cs
+src/Vam/Conv.cs
+src/Vam/Library.cs
+src/Vam/Music.cs
+src/Vam/Dancer.cs
+src/Vam/Player.cs
